@@ -1,0 +1,53 @@
+<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geo Helper</title>
+<style>
+  body{margin:0;font:14px system-ui,Segoe UI,Roboto,Arial;background:#0b1220;color:#e6eef7;
+       display:grid;place-items:center;height:100vh}
+  .card{background:#0e1728;border:1px solid #1b2a44;border-radius:12px;padding:16px;max-width:360px}
+  button{padding:10px 14px;border-radius:10px;border:0;background:#38bdf8;color:#03121f;
+         font-weight:600;cursor:pointer}
+  .small{color:#98a7bd;font-size:12px;margin-top:8px}
+</style>
+
+<div class="card">
+  <h3 style="margin:0 0 8px">Get Location</h3>
+  <p class="small">This secure helper will send your GPS coordinates to the parent page.</p>
+  <button id="btn">Allow Location</button>
+  <div id="msg" class="small"></div>
+</div>
+
+<script>
+const send = (obj)=> parent.postMessage(Object.assign({type:'geo'}, obj), '*');
+
+function doGeo(){
+  const m = document.getElementById('msg');
+  if(!('geolocation' in navigator)){ send({err:'no_geolocation'}); m.textContent='Geolocation not supported.'; return; }
+  m.textContent = 'Requesting location…';
+  navigator.geolocation.getCurrentPosition(
+    p => {
+      const {latitude, longitude, accuracy} = p.coords;
+      send({lat:latitude, lon:longitude, acc:accuracy});
+      m.textContent = `Lat ${latitude.toFixed(5)}, Lon ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`;
+    },
+    e => { send({err:e.message||'denied'}); m.textContent = 'Error: '+(e.message||'denied'); },
+    { enableHighAccuracy:true, timeout:8000, maximumAge:60000 }
+  );
+}
+
+// 1) بٹن کے ذریعے (user gesture)
+document.getElementById('btn').addEventListener('click', doGeo);
+
+// 2) آٹو موڈ: اگر والد صفحہ ?auto=1 یا #auto بھیجے تو فوراً
+const q = new URLSearchParams(location.search);
+if (q.get('auto') === '1' || location.hash.includes('auto')) {
+  // تھوڑا سا defer تاکہ iFrame لوڈ ہو کر parent attach ہو جائے
+  setTimeout(doGeo, 100);
+}
+
+// 3) اگر والد postMessage سے "go" بھیجے
+window.addEventListener('message', (e)=>{
+  const d = e.data || {};
+  if (d && d.type === 'go') doGeo();
+});
+</script>
