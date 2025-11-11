@@ -1,4 +1,5 @@
-<!doctype html><meta charset="utf-8">
+<!doctype html>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Geo Helper</title>
 <style>
@@ -18,37 +19,58 @@
 </div>
 
 <script>
-// const send = (obj)=> parent.postMessage(Object.assign({type:'geo'}, obj), '*');
-  const send = (obj)=> parent.postMessage(Object.assign({type:'geo'}, obj), PARENT_ORIGIN);
+/* ---------- Trusted parent origin resolve (ESP page) ---------- */
+/* ترجیح: ?parent=... > document.referrer > fallback (192.168.4.1) */
+const DEFAULT_PARENT = 'http://192.168.4.1';
+const PARENT_ORIGIN = (() => {
+  try {
+    const qs = new URLSearchParams(location.search);
+    const parentParam = qs.get('parent');
+    if (parentParam) return new URL(parentParam).origin;
+    if (document.referrer) return new URL(document.referrer).origin;
+  } catch(_) {}
+  return DEFAULT_PARENT;
+})();
+
+/* صرف trusted parent کو ہی postMessage کریں */
+const send = (obj) => parent.postMessage(Object.assign({ type:'geo' }, obj), PARENT_ORIGIN);
 
 function doGeo(){
   const m = document.getElementById('msg');
-  if(!('geolocation' in navigator)){ send({err:'no_geolocation'}); m.textContent='Geolocation not supported.'; return; }
+  if (!('geolocation' in navigator)){
+    send({err:'no_geolocation'});
+    m.textContent = 'Geolocation not supported.';
+    return;
+  }
   m.textContent = 'Requesting location…';
   navigator.geolocation.getCurrentPosition(
     p => {
-      const {latitude, longitude, accuracy} = p.coords;
-      send({lat:latitude, lon:longitude, acc:accuracy});
+      const { latitude, longitude, accuracy } = p.coords;
+      send({ lat: latitude, lon: longitude, acc: accuracy });
       m.textContent = `Lat ${latitude.toFixed(5)}, Lon ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`;
     },
-    e => { send({err:e.message||'denied'}); m.textContent = 'Error: '+(e.message||'denied'); },
-    { enableHighAccuracy:true, timeout:8000, maximumAge:60000 }
+    e => {
+      send({ err: e.message || 'denied' });
+      m.textContent = 'Error: ' + (e.message || 'denied');
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
   );
 }
 
-// 1) بٹن کے ذریعے (user gesture)
+/* 1) بٹن (user gesture) */
 document.getElementById('btn').addEventListener('click', doGeo);
 
-// 2) آٹو موڈ: اگر والد صفحہ ?auto=1 یا #auto بھیجے تو فوراً
+/* 2) آٹو موڈ: ?auto=1 یا #auto پر خود بخود چلائیں */
 const q = new URLSearchParams(location.search);
 if (q.get('auto') === '1' || location.hash.includes('auto')) {
-  // تھوڑا سا defer تاکہ iFrame لوڈ ہو کر parent attach ہو جائے
-  setTimeout(doGeo, 100);
+  setTimeout(doGeo, 100); // تھوڑا defer تاکہ parent attach ہو جائے
 }
 
-// 3) اگر والد postMessage سے "go" بھیجے
-window.addEventListener('message', (e)=>{
+/* 3) اگر والد صفحہ postMessage سے "go" بھیجے — مگر trusted origin پر */
+window.addEventListener('message', (e) => {
   const d = e.data || {};
-  if (d && d.type === 'go') doGeo();
+  if (e.origin === PARENT_ORIGIN && d && d.type === 'go') {
+    doGeo();
+  }
 });
 </script>
