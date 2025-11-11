@@ -1,76 +1,148 @@
 <!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Geo Helper</title>
-<style>
-  body{margin:0;font:14px system-ui,Segoe UI,Roboto,Arial;background:#0b1220;color:#e6eef7;
-       display:grid;place-items:center;height:100vh}
-  .card{background:#0e1728;border:1px solid #1b2a44;border-radius:12px;padding:16px;max-width:360px}
-  button{padding:10px 14px;border-radius:10px;border:0;background:#38bdf8;color:#03121f;
-         font-weight:600;cursor:pointer}
-  .small{color:#98a7bd;font-size:12px;margin-top:8px}
-</style>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Geo Helper (Secure)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<div class="card">
-  <h3 style="margin:0 0 8px">Get Location</h3>
-  <p class="small">This secure helper will send your GPS coordinates to the parent page.</p>
-  <button id="btn">Allow Location</button>
-  <div id="msg" class="small"></div>
-</div>
+  <style>
+    :root{
+      --bg:#0b1220; --card:#0e1728; --border:#1b2a44; --text:#e6eef7; --muted:#98a7bd; --brand:#38bdf8;
+    }
+    html,body{margin:0;height:100%}
+    body{
+      font:14px system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background:var(--bg); color:var(--text);
+      display:grid; place-items:center; min-height:100vh;
+    }
+    .card{
+      background:var(--card); border:1px solid var(--border);
+      border-radius:12px; padding:16px; width:min(92vw,420px);
+      box-shadow:0 10px 28px rgba(56,189,248,.12);
+    }
+    h3{margin:0 0 8px; font-size:18px}
+    .small{color:var(--muted); font-size:12px; margin-top:8px}
+    button{
+      appearance:none; border:0; border-radius:10px; cursor:pointer;
+      padding:10px 14px; font-weight:600; background:var(--brand); color:#03121f;
+      min-height:42px;
+    }
+    .row{display:flex; gap:8px; align-items:center; justify-content:space-between}
+    .hint{margin-top:8px}
+    .ok{color:#6ee7b7}
+    .err{color:#fca5a5}
+    .muted{opacity:.9}
+    code{background:#0a1220; padding:.2em .35em; border-radius:6px; border:1px solid #16233a}
+  </style>
+</head>
+<body>
+  <div class="card" role="group" aria-label="Secure Geolocation Helper">
+    <h3>Get Location</h3>
+    <p class="small">This secure helper (served over HTTPS) will capture your GPS and send it to the controller page.</p>
+    <div class="row" style="margin:8px 0 10px">
+      <button id="btn" type="button">Allow Location</button>
+      <span id="state" class="small muted">Idle</span>
+    </div>
+    <div id="msg" class="small hint"></div>
+    <div id="mode" class="small hint"></div>
+  </div>
 
-<script>
-/* ---------- Trusted parent origin resolve (ESP page) ---------- */
-/* ترجیح: ?parent=... > document.referrer > fallback (192.168.4.1) */
-const DEFAULT_PARENT = 'http://192.168.4.1';
-const PARENT_ORIGIN = (() => {
-  try {
-    const qs = new URLSearchParams(location.search);
-    const parentParam = qs.get('parent');
-    if (parentParam) return new URL(parentParam).origin;
-    if (document.referrer) return new URL(document.referrer).origin;
-  } catch(_) {}
-  return DEFAULT_PARENT;
-})();
+  <script>
+  // ---------- Config & Parent Origin Resolution ----------
+  const DEFAULT_PARENT = 'http://192.168.4.1';       // ESP web UI origin (fallback)
+  const qs = new URLSearchParams(location.search);
 
-/* صرف trusted parent کو ہی postMessage کریں */
-const send = (obj) => parent.postMessage(Object.assign({ type:'geo' }, obj), PARENT_ORIGIN);
+  // If parent origin is provided as ?parent=..., prefer that; else use document.referrer; else fallback.
+  const PARENT_ORIGIN = (() => {
+    try{
+      const p = qs.get('parent');
+      if (p) return new URL(p).origin;
+      if (document.referrer) return new URL(document.referrer).origin;
+    }catch(_){}
+    return DEFAULT_PARENT;
+  })();
 
-function doGeo(){
-  const m = document.getElementById('msg');
-  if (!('geolocation' in navigator)){
-    send({err:'no_geolocation'});
-    m.textContent = 'Geolocation not supported.';
-    return;
+  const isPopup = location.hash.includes('popup');
+
+  // UI elements
+  const $ = (s)=>document.querySelector(s);
+  const msgEl = $('#msg');
+  const stateEl = $('#state');
+  const modeEl = $('#mode');
+
+  modeEl.textContent = `Parent origin: ${PARENT_ORIGIN} ${isPopup ? '(popup mode)' : '(iframe mode)'}`;
+
+  // ---------- Safe postMessage helper (parent + opener) ----------
+  function sendAny(obj){
+    const payload = Object.assign({type:'geo'}, obj);
+    let sent = false;
+    try{ parent.postMessage(payload, PARENT_ORIGIN); sent = true; }catch(_){}
+    try{ if (window.opener) { window.opener.postMessage(payload, PARENT_ORIGIN); sent = true; } }catch(_){}
+    return sent;
   }
-  m.textContent = 'Requesting location…';
-  navigator.geolocation.getCurrentPosition(
-    p => {
-      const { latitude, longitude, accuracy } = p.coords;
-      send({ lat: latitude, lon: longitude, acc: accuracy });
-      m.textContent = `Lat ${latitude.toFixed(5)}, Lon ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`;
-    },
-    e => {
-      send({ err: e.message || 'denied' });
-      m.textContent = 'Error: ' + (e.message || 'denied');
-    },
-    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-  );
-}
 
-/* 1) بٹن (user gesture) */
-document.getElementById('btn').addEventListener('click', doGeo);
+  function setState(t){ if (stateEl) stateEl.textContent = t; }
 
-/* 2) آٹو موڈ: ?auto=1 یا #auto پر خود بخود چلائیں */
-const q = new URLSearchParams(location.search);
-if (q.get('auto') === '1' || location.hash.includes('auto')) {
-  setTimeout(doGeo, 100); // تھوڑا defer تاکہ parent attach ہو جائے
-}
+  // ---------- Geolocation flow ----------
+  function doGeo(){
+    if (!('geolocation' in navigator)){
+      setState('No geolocation API');
+      msgEl.innerHTML = `<span class="err">Geolocation not supported in this browser.</span>`;
+      sendAny({err:'no_geolocation'});
+      return;
+    }
+    setState('Requesting…');
+    msgEl.textContent = 'Requesting secure GPS via GitHub…';
 
-/* 3) اگر والد صفحہ postMessage سے "go" بھیجے — مگر trusted origin پر */
-window.addEventListener('message', (e) => {
-  const d = e.data || {};
-  if (e.origin === PARENT_ORIGIN && d && d.type === 'go') {
-    doGeo();
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setState('Success ✓');
+        msgEl.innerHTML =
+          `<span class="ok">Lat ${latitude.toFixed(5)}, Lon ${longitude.toFixed(5)}</span> (±${Math.round(accuracy)}m)`;
+
+        const ok = sendAny({ lat:latitude, lon:longitude, acc:accuracy });
+        if (!ok){
+          // If target couldn't be messaged (e.g., pop-up blocked opener), hint the user.
+          const hint = isPopup
+            ? 'You can close this window now; if the main page did not update, return and press "Use Phone Location".'
+            : 'If the main page did not update, please try again.';
+          msgEl.innerHTML += `<div class="small">${hint}</div>`;
+        }
+      },
+      err => {
+        setState('Error');
+        msgEl.innerHTML = `<span class="err">Error:</span> ${err && err.message ? err.message : 'denied'}`;
+        sendAny({err: (err && err.message) || 'denied'});
+      },
+      { enableHighAccuracy:true, timeout:8000, maximumAge:60000 }
+    );
   }
-});
-</script>
+
+  // Click (user gesture) – often required for iframes
+  document.getElementById('btn').addEventListener('click', doGeo);
+
+  // Auto-run when ?auto=1 or #auto present
+  if (qs.get('auto') === '1' || location.hash.includes('auto')) {
+    // small defer so that parent/opener attach before we respond
+    setTimeout(doGeo, 120);
+  }
+
+  // If parent sends {type:'go'} we trigger again (only from trusted origin)
+  window.addEventListener('message', (e)=>{
+    if (!e || !e.data) return;
+    if (e.origin !== PARENT_ORIGIN) return;     // trust gate
+    if (e.data.type === 'go') doGeo();
+  });
+
+  // Helpful status for users
+  if (isPopup){
+    setState('Ready (popup)');
+    msgEl.innerHTML = `This window is secure (HTTPS). If asked, press <b>Allow</b> to share location.`;
+  }else{
+    setState('Ready (iframe)');
+    msgEl.innerHTML = `If nothing happens after a few seconds in the main page, it might open a secure popup.`;
+  }
+  </script>
+</body>
+</html>
